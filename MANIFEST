@@ -1,0 +1,11 @@
+lib/Win32/InstallShield.pm
+t/pod-coverage.t
+t/pod.t
+t/operations.t
+t/add.ism
+t/del.ism
+t/update.ism
+t/original.ism
+MANIFEST
+Makefile.PL
+README

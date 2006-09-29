@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?xml-stylesheet type="text/xsl" href="is.xsl" ?>
+<!DOCTYPE msi [
+   <!ELEMENT msi   (summary,table*)>
+
+   <!ELEMENT table         (col+,row*)>
+]>
+<msi version="2.0" xmlns:dt="urn:schemas-microsoft-com:datatypes">
+	
+	<summary>
+		<codepage>1252</codepage>
+		<title>##ID_STRING1##</title>
+	</summary>
+	
+	<table name="Property">
+		<col key="yes" def="s72">Property</col>
+		<col def="L0">Value</col>
+		<col def="S255">ISComments</col>
+		<row><td>ProductName</td><td>Test</td><td/></row>
+		<row><td>ProductVersion</td><td>1.2.3</td><td/></row>
+	</table>
+
+	<table name="Empty">
+		<col key="yes" def="s10">Key</col>
+		<col def="s10">Value</col>
+	</table>
+</msi>
