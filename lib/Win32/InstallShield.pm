@@ -9,7 +9,7 @@ use strict;
 use warnings;
 
 our $AUTOLOAD;
-our $VERSION = 0.1;
+our $VERSION = 0.2;
 
 =head1 NAME
 
@@ -72,6 +72,7 @@ sub new {
 		parsed		=> {}, # tables that the user has read or modified
 		sections	=> {}, # the contents of the original file
 		order		=> [], # the order in which sections appear in the file
+		filename	=> undef,
 	};
 
 	bless $self, $class;
@@ -90,7 +91,7 @@ sub AUTOLOAD {
 	my $self = shift;
 	my $name = $AUTOLOAD;
 	$name =~ s/.*://;
-	if($name =~ /^(gethash|getarray|add|del|update)_?(.*)$/i) {
+	if($name =~ /^(addorupdate|searchhash|searcharray|gethash|getarray|add|del|update)_?(.*)$/i) {
 		my ($op, $table) = (lc($1), lc($2));
 
 		if($table eq 'row') {
@@ -105,6 +106,12 @@ sub AUTOLOAD {
 			return $self->_get_row_hash($table, @_);
 		} elsif($op eq 'getarray') {
 			return $self->_get_row_array($table, @_);
+		} elsif($op eq 'searchhash') {
+			return $self->_search_row_hash($table, @_);
+		} elsif($op eq 'searcharray') {
+			return $self->_search_row_array($table, @_);
+		} elsif($op eq 'addorupdate') {
+			return $self->_add_or_update_row($table, @_);
 		} elsif($op eq 'add') {
 			return $self->_add_row($table, @_);
 		} elsif($op eq 'del') {
@@ -133,8 +140,9 @@ sub _openfile {
 		}
 	} else {
 		my $fh = IO::File->new($file, $mode);
+		my $long_mode = ($mode eq 'r') ? 'read' : 'write';
 		unless(defined($fh)) {
-			carp("Unable to read $file $!");
+			carp("Unable to $long_mode $file $!");
 			return (undef, 0);
 		}
 		return ($fh, 1);
@@ -163,7 +171,10 @@ sub loadfile {
 	}
 
 	my $return = $self->load( join('', <$fh>) );
-	$fh->close() if($i_opened_file);
+	if($i_opened_file) {
+		$fh->close();
+		$self->{'filename'} = $file;
+	}
 	return $return;
 }
 
@@ -182,6 +193,7 @@ sub load {
 	$self->{'parsed'} = {};
 	$self->{'sections'} = {};
 	$self->{'order'} = [];
+	$self->{'filename'} = undef;
 
 	my $section = 'header';
 	my $lastsection = $section;
@@ -214,17 +226,29 @@ sub load {
 
 =item I<savefile>
 
+  $is->savefile( );
   $is->savefile( $filename );
   $is->savefile( $io_file_handle );
 
 Stores the ism data in a file. Can be called
 with either a filename or an IO::File object that is
-opened in write ("w") mode.
+opened in write ("w") mode. If no argument is passed,
+and the last load was via a filename, savefile will
+default to the filename previously supplied.
 Returns 1 on success, 0 on failure.
 
 =cut
 sub savefile {
 	my ($self, $file) = @_;
+	
+	unless(defined($file)) {
+		if(defined($self->{'filename'})) {
+			$file = $self->{'filename'};
+		} else {
+			carp("You must provide a filename to save to");
+			return 0;
+		}
+	}
 	
 	my ($fh, $i_opened_file) = _openfile($file, "w");
 
@@ -266,8 +290,20 @@ sub _save_table {
 	my ($self, $table) = @_;
 
 	my $p = $self->_parsed($table);
-	my $text = $p->{'header'};
-	
+	my $text = "\t<table";
+	foreach my $key (sort keys %{$p->{'attributes'}}) {
+		$text .= " $key=\"$p->{'attributes'}{$key}\"";
+	}
+	$text .= ">\n";
+
+	foreach my $col (@{$p->{'columns'}}) {
+		$text .= "\t\t<col";
+		if($col->{'is_key'}) {
+			$text .= ' key="yes"';
+		}
+		$text .= ' def="' . $col->{'type'} . $col->{'width'} . '"';
+		$text .= ">$col->{'name'}</col>\n";
+	}
 	foreach my $key (sort keys %{$p->{'data'}}) {
 		my $row = $p->{'data'}{$key};
 		$text .= "\t\t<row>";
@@ -280,9 +316,9 @@ sub _save_table {
 		}
 		$text .= "</row>\n";
 	}
-	
-	$text .= $p->{'trailer'};
-	
+
+	$text .= "\t</table>\n\n";
+
 	return $text;
 }
 
@@ -297,50 +333,48 @@ sub _parse_table {
 	my $text = $self->{'sections'}{$table};
 	unless(defined($text)) {
 		carp("No such table $table");
+		return;
 	}
 
-	my $header = '';
-	my $trailer = '';
 	my @cols;
 	my %data;
 
-	foreach my $line (@$text) {
-		if($line =~ /^\s+<table/) {
-			$header .= $line . "\n";
-		} elsif($line =~ /^\s+<col ([^>]+)>([^<]+)</) {
-			my $column_name = $2;
-			my $attrs = $1;
-			my $is_key = ($attrs =~ /key="yes"/i);
-			my ($type, $width) = ($attrs =~ /def="(\w)(\d+)"/i);
+	my $xml = join("\n", @$text);
+	my @parsed = @{$self->{'parser'}->parse($xml)->[1]};
+
+	my $attributes = shift @parsed;
+
+	while(@parsed) {
+		my $type = shift @parsed;
+		if($type eq 'col') {
+			my $columns = shift @parsed;
+			my $column_name = $columns->[2];
+			my $is_key = ( defined($columns->[0]{'key'}) and $columns->[0]{'key'} eq 'yes' );
+			my ($type, $width) = ($columns->[0]{'def'} =~ /(\w)(\d+)/);
 			push(@cols, {
 				name	=> $column_name,
 				is_key	=> $is_key,
 				type	=> $type,
 				width	=> $width,
 			});
-			$header .= $line . "\n";
-		} elsif($line =~ /^\s+<row/) {
-			# FIXME get rid of xml parser and do this locally
-			my $columns = $self->{'parser'}->parse($line)->[1];
-			my $lookup_key = '';
+		} elsif($type eq 'row') {
+			my $columns = shift @parsed;
 			my @row;
+			my $lookup_key = '';
 			foreach my $i (0..$#cols) {
 				my $value = $columns->[ ($i+1)*2 ][2];
 				$row[$i] = $value;
 				$lookup_key .= sprintf("%-" . $cols[$i]{'width'} . "s", $value) if($cols[$i]{'is_key'});
 			}
 			$data{ $lookup_key } = \@row;
-
-		} elsif($line =~ /^$/ or $line =~ /^\s+<\/table/) {
-			$trailer .= $line . "\n";
 		} else {
-			print "Invalid line in file: $line\n";
+			# ignore text
+			shift @parsed;
 		}
 	}
-
+	
 	$self->{'parsed'}{$table} = {
-		header		=> $header,
-		trailer		=> $trailer,
+		attributes	=> $attributes,
 		columns		=> \@cols,
 		data		=> \%data,
 	};
@@ -453,6 +487,39 @@ sub _find_row {
 	}
 }
 
+sub _search_row {
+	my ($self, $table, $rowdata) = @_;
+	my @results;
+	my $p = $self->_parsed($table);
+	foreach my $row (values %{$p->{'data'}}) {
+		my $match = 1;
+		foreach my $i (0..$#{$rowdata}) {
+			# undef means they don't care about this column
+			if(defined($rowdata->[$i])) {
+				# empty string from the user matches undef in the data
+				if(defined($row->[$i])) {
+					if(ref($rowdata->[$i]) eq 'Regexp') {
+						if($row->[$i] !~ /$rowdata->[$i]/) { 
+							$match = 0;
+							last;
+					    	}
+					} elsif($rowdata->[$i] ne $row->[$i]) {
+						$match = 0;
+						last;
+					}
+				} elsif($rowdata->[$i] ne '') {
+					$match = 0;
+					last;
+				}
+			}
+		}
+		if($match) {
+			push(@results, $row);
+		}
+	}
+	return \@results;
+}
+
 sub _build_key {
 	my ($self, $table, $values) = @_;
 
@@ -492,6 +559,14 @@ sub _reformat_args {
 		$row = \@args;
 	}
 
+	# if the user left columns off the end, fill them
+	# with undef
+	my $missing_columns = $#{$p->{'columns'}} - $#{$row};
+	if($missing_columns > 0) {
+		for( 1..$missing_columns ) {
+			push(@{$row}, undef);
+		}
+	}
 	return $row;
 }
 
@@ -528,7 +603,7 @@ sub _check_args {
 
 =back
 
-=head1 ROW MANIPULATION METHODS
+=head1 ROW MANIPULATION METHOD SYNTAX
 
 Row manipulation methods can be called in different ways.
 First, they are all case insensitve, and the '_' is
@@ -556,14 +631,14 @@ order (which you can get by looking at the ism or calling
 the I<columns> method), and pass it to the method.
 
   my @rowdata = ( 'Column_1_Value', 'Column_2_value' );
-  $success = update_row( $table, @rowdata );
+  $success = $is->update_row( $table, @rowdata );
 
 Array ref
 
 You can do the same as above, but pass it as a single
 array reference.
 
-  $success = update_row( $table, \@rowdata );
+  $success = $is->update_row( $table, \@rowdata );
 
 Hash ref
 
@@ -575,13 +650,15 @@ as keys.
       Value      => '1.2.3.4',
       ISComments => '',
   );
-  $success = update_row( $table, \%rowdata );
+  $success = $is->update_row( $table, \%rowdata );
+
+=head1 ROW MANIPULATION METHODS
 
 =over 4
 
-=item I<gethash_row>
+=item I<getHash_row>
 
-  my $row = gethash_row( $table, $rowdata );
+  my $row = $is->getHash_row( $table, $rowdata );
 
 Returns a hash ref containing the data that matches the keys
 supplied in $rowdata. Returns undef if the row is not found.
@@ -604,9 +681,9 @@ sub _get_row_hash {
 	}
 }
 
-=item I<getarray_row>
+=item I<getArray_row>
 
-  my $row = getarray_row( $table, $rowdata );
+  my $row = $is->getArray_row( $table, $rowdata );
 
 Returns an array ref containing the data that matches the keys
 supplied in $rowdata. Returns undef if the row is not found.
@@ -626,7 +703,7 @@ sub _get_row_array {
 
 =item I<update_row>
 
-  my $success = update_row( $table, $rowdata );
+  my $success = $is->update_row( $table, $rowdata );
 
 Updates the row that matches the keys supplied in
 $rowdata. Any columns for which an undef is supplied
@@ -657,7 +734,7 @@ sub _update_row {
 
 =item I<add_row>
 
-  my $success = add_row( $table, $rowdata );
+  my $success = $is->add_row( $table, $rowdata );
 
 Adds a row containing the data in $rowdata. Returns
 1 on success, 0 on failure.
@@ -685,7 +762,7 @@ sub _add_row {
 
 =item I<del_row>
 
-  my $success = del_row( $table, $rowdata );
+  my $success = $is->del_row( $table, $rowdata );
 
 Deletes the row that matches the keys supplied in
 $rowdata. Returns 1 on success, 0 on failure.
@@ -703,6 +780,78 @@ sub _del_row {
 	delete($p->{'data'}{$rowkey});
 	return 1;
 }
+
+=item I<add_or_update_row>
+
+  my $success = $is->add_or_update_row( $table, $rowdata );
+
+Adds a row if no row exists with the supplied keys, updates
+the matching row otherwise.
+
+=cut
+sub _add_or_update_row {
+	my ($self, $table, @args) = @_;
+	my $args = $self->_reformat_args($table, @args);
+	my $rowkey = $self->_find_row($table, $args);
+	if(defined($rowkey)) {
+		return $self->_update_row($table, $args);
+	} else {
+		return $self->_add_row($table, $args);
+	}
+}
+
+=item I<searchHash_row>
+
+  my $rows = $is->searchHash_row( $table, $rowdata );
+
+Returns any rows in the given table that match the supplied 
+columns. The return value is an arrayref, where each entry is
+a hash as would be returned by I<getHash_row>. Returns an empty
+arrayref if no matches are found. Returns the entire table if
+no $rowdata argument is provided.
+
+Columns with undefined values will be ignored for matching purposes.
+Values used for matching can be either literal strings, in which
+case an exact match is required, or quoted regular expressions such as:
+
+  my $rows = $is->searchHash_row( 'Property', { Property=>qr/^_/ } );
+
+This would search for all properties that begin with an underscore.
+
+=cut
+sub _search_row_hash {
+	my ($self, $table, @args) = @_;
+	my $args = $self->_reformat_args($table, @args);
+	my $results = $self->_search_row($table, $args);
+
+	my @hash_results;
+	my $p = $self->_parsed($table);
+	
+	foreach my $row (@{$results}) {
+		my %rowdata;
+		foreach my $i (0..$#{$p->{'columns'}}) {
+			$rowdata{ $p->{'columns'}[$i]{'name'} } = $row->[$i];
+		}
+		push(@hash_results, \%rowdata);
+	}
+
+	return \@hash_results;
+}
+
+=item I<searchArray_row>
+
+  my $rows = $is->searchArray_row( $table, $rowdata );
+
+Works the same as I<searchHash_row>, but returns an arrayref containing
+arrayrefs, like I<getArray_row> instead of hashrefs.
+
+=cut
+sub _search_row_array {
+	my ($self, $table, @args) = @_;
+	my $args = $self->_reformat_args($table, @args);
+	return $self->_search_row($table, $args);
+}
+
 
 # this is (almost) a copy of the xml_escape function in XML::Parser::Expat.
 # The version there doesn't seem to work properly on data that was read

@@ -16,6 +16,10 @@
 		<col key="yes" def="s72">Property</col>
 		<col def="L0">Value</col>
 		<col def="S255">ISComments</col>
+		<row><td>MultiLine</td><td>This
+spans
+multiple
+lines</td><td/></row>
 		<row><td>ProductVersion</td><td>1.2.3</td><td/></row>
 	</table>
 

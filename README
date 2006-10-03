@@ -1,4 +1,4 @@
-Win32::InstallShield version 0.1
+Win32::InstallShield version 0.2
 =============================
 
 This module is an interface to manipulate XML output files (.ism)

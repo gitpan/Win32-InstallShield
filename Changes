@@ -1,0 +1,10 @@
+Revision history for Perl extension Win32::InstallShield
+
+Version 0.2 (2006/10/03)
+	- Fix for multi-line values in tables
+	- Added AddOrUpdate method
+	- Made savefile filename default to previous loadfile value
+	- Added searchHash and searchArray methods
+
+Version 0.1 (2006/09/29)
+	- initial release

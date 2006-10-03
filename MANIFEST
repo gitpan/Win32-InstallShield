@@ -9,3 +9,7 @@ t/original.ism
 MANIFEST
 Makefile.PL
 README
+Changes
+examples/find_property.pl
+examples/modify.pl
+META.yml
