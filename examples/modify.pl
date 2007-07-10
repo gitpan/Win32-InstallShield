@@ -50,6 +50,15 @@ sub main {
 		Value		=> 'NewValue',
 	});
 
+	# here's how to modify a key column. you can't simply call update,
+	# because it uses the key values you supply to lookup the row. be wary
+	# of modifying key columns, since you need to then update any foreign
+	# keys as well
+	my $dialog = $is->getHash_Dialog('AdminWelcome');
+	$is->DelDialog('AdminWelcome');
+	$dialog->{'Dialog'} = 'AdminTakeOffHoser';
+	$is->AddDialog( $dialog );
+
 	# this example demonstrates getting an existing row,
 	# and updating one of the values. specifically, it will
 	# append the version major number to the product name

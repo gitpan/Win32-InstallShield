@@ -9,7 +9,7 @@ use strict;
 use warnings;
 
 our $AUTOLOAD;
-our $VERSION = 0.2;
+our $VERSION = 0.3;
 
 =head1 NAME
 
@@ -47,7 +47,7 @@ This example updates the product version.
       }
   );
 
-  $is->save_file( $ism_file );
+  $is->savefile( $ism_file );
 
 =head1 METHODS
 
@@ -72,6 +72,9 @@ sub new {
 		parsed		=> {}, # tables that the user has read or modified
 		sections	=> {}, # the contents of the original file
 		order		=> [], # the order in which sections appear in the file
+		tables		=> {}, # the tables that appear in the ism file
+		foreign_keys	=> {}, # tables referenced by foreign keys
+		correct_case	=> {}, # stores case-sensitive table names
 		filename	=> undef,
 	};
 
@@ -91,7 +94,7 @@ sub AUTOLOAD {
 	my $self = shift;
 	my $name = $AUTOLOAD;
 	$name =~ s/.*://;
-	if($name =~ /^(addorupdate|searchhash|searcharray|gethash|getarray|add|del|update)_?(.*)$/i) {
+	if($name =~ /^(addorupdate|searchhash|searcharray|gethash|getarray|add|del|update|purge)_?(.*)$/i) {
 		my ($op, $table) = (lc($1), lc($2));
 
 		if($table eq 'row') {
@@ -118,6 +121,8 @@ sub AUTOLOAD {
 			return $self->_del_row($table, @_);
 		} elsif($op eq 'update') {
 			return $self->_update_row($table, @_);
+		} elsif($op eq 'purge') {
+			return $self->_purge_row($table, @_);
 		}
 
 	} else {
@@ -193,6 +198,9 @@ sub load {
 	$self->{'parsed'} = {};
 	$self->{'sections'} = {};
 	$self->{'order'} = [];
+	$self->{'tables'} = {};
+	$self->{'foreign_keys'} = {};
+	$self->{'correct_case'} = {};
 	$self->{'filename'} = undef;
 
 	my $section = 'header';
@@ -209,6 +217,9 @@ sub load {
 			$section = 'summary';
 		} elsif(/^\s*<table name="([^"]+)"/) {
 			$section = lc($1);
+			$self->{'correct_case'}{$section} = $1;
+			# remember which sections are tables
+			$self->{'tables'}{$1} = 1;
 		} elsif(/^<\/msi>/) {
 			$section = 'trailer';
 		}
@@ -216,6 +227,17 @@ sub load {
 		if($section ne $lastsection) {
 			$lastsection = $section;
 			push(@{$self->{'order'}}, $section);
+		}
+
+		# remember what tables each foreign key appears in
+		if(/^\s*<col [^>]+>([^<]+)</) {
+			my $colname = $1;
+			if($colname =~ /_$/) {
+				unless(exists($self->{'foreign_keys'}{$colname})) {
+					$self->{'foreign_keys'}{$colname} = [];
+				}
+				push(@{$self->{'foreign_keys'}{$colname}}, $section);
+			}
 		}
 
 		push(@{$self->{'sections'}{$section}}, $_);
@@ -273,11 +295,18 @@ sub save {
 
 	my $text = '';
 
-	foreach my $table (@{$self->{'order'}}) {
-		if($self->{'parsed'}{$table}) {
-			$text .= $self->_save_table($table);
+	foreach my $section (@{$self->{'order'}}) {
+		if($self->{'parsed'}{$section}) {
+			# the table has been (possibly) modified, so rebuild it
+			$text .= $self->_save_table($section);
 		} else {
-			$text .= join("\n", @{$self->{'sections'}{$table}}) . "\n";
+			# when the last table gets modified, we end up with an
+			# extra newline
+			if($section eq 'trailer') {
+				$text =~ s/\n\n$/\n/;
+			}
+			# section wasn't touched, just spit out the stored text
+			$text .= join("\n", @{$self->{'sections'}{$section}}) . "\n";
 		}
 	}
 
@@ -364,7 +393,12 @@ sub _parse_table {
 			foreach my $i (0..$#cols) {
 				my $value = $columns->[ ($i+1)*2 ][2];
 				$row[$i] = $value;
-				$lookup_key .= sprintf("%-" . $cols[$i]{'width'} . "s", $value) if($cols[$i]{'is_key'});
+
+				if($cols[$i]{'is_key'}) {
+					my $key_value = $value;
+					unless(defined($key_value)) { $key_value = ''; }
+					$lookup_key .= sprintf("%-" . $cols[$i]{'width'} . "s", $key_value)
+				}
 			}
 			$data{ $lookup_key } = \@row;
 		} else {
@@ -387,6 +421,19 @@ sub _parsed {
 		$self->_parse_table($table);
 	}
 	return $self->{'parsed'}{$table};
+}
+
+=item I<tables>
+
+  my $tables = $is->tables();
+
+Returns an arrayref containing a list of all the tables
+that were found in the ISM file.
+
+=cut
+sub tables {
+	my ($self) = @_;
+	return [ sort keys %{$self->{'tables'}} ];
 }
 
 =item I<column_is_key>
@@ -520,6 +567,9 @@ sub _search_row {
 	return \@results;
 }
 
+# the lookup key is just the primary key columns concatenated together,
+# with padding to the full column length. this function builds the key
+# given the column values
 sub _build_key {
 	my ($self, $table, $values) = @_;
 
@@ -542,6 +592,9 @@ sub _build_key {
 	return $lookup_key;
 }
 
+# takes the various formats allowed for specifying row data,
+# and returns a consistent structure to be used by other methods.
+# also fills in any missing columns with undef
 sub _reformat_args {
 	my ($self, $table, @args) = @_;
 
@@ -601,6 +654,86 @@ sub _check_args {
 	return $row;
 }
 
+=item I<property>
+
+  my $version = $is->property('ProductVersion');
+  $is->property('ProductVersion', $version);
+
+Gets or sets the value associated with a property. If no
+value is supplied, the current value of the property is returned.
+If a value is supplied, it will attempt to update the property and
+return 1 on success and 0 on failure. undef is returned in either
+case if the property does not exist.
+
+=cut
+sub property {
+	my ($self, $property, $value) = @_;
+	unless(defined($self->getHash_Property({ Property=>$property }))) {
+		return undef;
+	}
+	if(defined($value)) {
+		$self->update_Property({ Property=>$property, Value=>$value });
+	}
+	return $self->getHash_Property({ Property=>$property });
+}
+
+=item I<featureComponents>
+
+  my $components = $is->featureComponents( $feature );
+
+Returns an arrayref of the components in the named feature. Returns
+undef if the feature does not exist.
+
+=cut
+sub featureComponents {
+	my ($self, $feature) = @_;
+	my $list = $self->searchHash_FeatureComponents({ Feature_=>$feature });
+	unless(@{$list}) {
+		return undef;
+	}
+
+	my @components = sort map { $_->{'Component_'} } @{$list};
+
+	return \@components;
+}
+
+=item I<purge_row>
+
+	$is->purge_row( $table, $key_value );
+	$is->purge_row( 'Component', 'Awesome.dll' );
+	$is->PurgeComponent( 'Awesome.dll' );
+
+Removes the row with the given key from the given table, and any rows
+in other tables with foreign keys that reference it. Key values are
+case sensitive. This only works for tables with a key column that has
+the same name as the table, which seems to be the only way you can use
+foreign keys in an ISM in any case. Returns 1 on success, 0 on failure.
+
+=cut
+sub _purge_row {
+	my ($self, $table, $key_value) = @_;
+
+	# make sure the key exists in the table
+	my $rowkey = $self->_find_row($table, $self->_reformat_args($table, $key_value));
+	unless(defined($rowkey)) {
+		return 0;
+	}
+
+	$self->_del_row($table, $rowkey);
+
+	my $foreign_key_col = $self->{'correct_case'}{$table} . '_';
+
+	foreach my $table (@{$self->{'foreign_keys'}{$foreign_key_col}}) {
+		my $rows_to_delete = $self->_search_row_array($table, { $foreign_key_col => $key_value });
+		if(@{$rows_to_delete}) {
+			foreach my $row (@{$rows_to_delete}) {
+				$self->_del_row($table, $row) or return 0;
+			}
+		}
+	}
+
+	return 1;
+}
 =back
 
 =head1 ROW MANIPULATION METHOD SYNTAX
@@ -851,7 +984,6 @@ sub _search_row_array {
 	my $args = $self->_reformat_args($table, @args);
 	return $self->_search_row($table, $args);
 }
-
 
 # this is (almost) a copy of the xml_escape function in XML::Parser::Expat.
 # The version there doesn't seem to work properly on data that was read

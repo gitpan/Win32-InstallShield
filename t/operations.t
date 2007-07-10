@@ -1,26 +1,35 @@
-use Test::More tests => 13;
+use Test::More;
 use Win32::InstallShield;
 
 my $is = Win32::InstallShield->new();
 
+my @tests = (
+	\&no_change,
+	\&array_add, 
+	\&hash_add, 
+	\&add_and_del, 
+	\&del_and_readd,
+	\&hash_update,
+	\&array_update,
+	\&hash_del,
+	\&array_del,
+	\&add_or_update_add,
+	\&add_or_update_update,
+	\&hash_search,
+	\&array_search,
+	\&foreign_key_remove,
+	\&get_property,
+	\&set_property,
+	\&tables,
+	\&feature_components,
+);
+
 main();
 
 sub main {
-	foreach my $sub ( 
-			\&no_change,
-			\&array_add, 
-			\&hash_add, 
-			\&add_and_del, 
-			\&del_and_readd,
-			\&hash_update,
-			\&array_update,
-			\&hash_del,
-			\&array_del,
-			\&add_or_update_add,
-			\&add_or_update_update,
-			\&hash_search,
-			\&array_search,
-		) {
+	plan(tests => scalar(@tests));
+	# for each test routine, reload the original ISM file
+	foreach my $sub (@tests) {
 		$is->loadfile( 't/original.ism' );
 		&$sub();
 	}
@@ -107,6 +116,45 @@ sub array_search {
 	is_deeply( $result, $expected_result, "Array Search" );
 }
 
+sub foreign_key_remove {
+	$is->purge_Component( 'ComponentA.dll' );
+	ok( compare_file( 't/purge.ism' ), "Purge Key" );
+}
+
+# tests for the 'property' convenience function
+sub get_property {
+	my $product_name = $is->property('ProductName');
+	is( $product_name->{'Value'}, 'Test', 'Get Property' );
+}
+
+sub set_property {
+	$is->property( 'ProductName', 'Updated' );
+	ok( compare_file( 't/update.ism' ), 'Set Property' );
+}
+
+sub tables {
+	my $expected_result = [
+		'Component',
+		'Empty',
+		'FeatureComponents',
+		'File',
+		'Property',
+	];
+	my $tables = $is->tables();
+	is_deeply( $tables, $expected_result, "Get Tables" );
+}
+
+sub feature_components {
+	my $expected_result = [
+		'ComponentA.dll',
+		'ComponentB.dll',
+	];
+	my $components = $is->featureComponents( 'Feature1' );
+	is_deeply( $components, $expected_result, "Feature Components" );
+}
+
+# compares the contents of a file on disk to the current
+# value of the ISM in memory
 sub compare_file {
 	my ($file) = @_;
 	open(F, "<$file");
