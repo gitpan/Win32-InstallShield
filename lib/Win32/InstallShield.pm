@@ -9,7 +9,7 @@ use strict;
 use warnings;
 
 our $AUTOLOAD;
-our $VERSION = 0.3;
+our $VERSION = 0.4;
 
 =head1 NAME
 
@@ -102,7 +102,8 @@ sub AUTOLOAD {
 		}
 
 		unless($self->{'sections'}{$table}) {
-			croak("No such table: $2");
+			carp("No such table: $2");
+			return undef;
 		}
 
 		if($op eq 'gethash') {
@@ -434,6 +435,21 @@ that were found in the ISM file.
 sub tables {
 	my ($self) = @_;
 	return [ sort keys %{$self->{'tables'}} ];
+}
+
+=item I<has_table>
+
+  if($is->has_table( 'ModuleSignature' ) {
+    print "This is a merge module\n";
+  }
+
+Returns true if a table exists with the supplied name, false otherwise.
+Table names are case-insensitive.
+
+=cut
+sub has_table {
+	my ($self, $table) = @_;
+	return exists($self->{'sections'}{lc($table)});
 }
 
 =item I<column_is_key>

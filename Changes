@@ -1,5 +1,8 @@
 Revision history for Perl extension Win32::InstallShield
 
+Version 0.4 (2007/07/11)
+	- Added 'has_table' method
+
 Version 0.3 (2007/07/10)
 	- Added 'tables', 'property', 'purge_row', and 'featureComponents' methods
 	- Fixed a POD typo in one of the examples

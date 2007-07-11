@@ -21,6 +21,8 @@ my @tests = (
 	\&get_property,
 	\&set_property,
 	\&tables,
+	\&has_table,
+	\&hasnt_table,
 	\&feature_components,
 );
 
@@ -142,6 +144,14 @@ sub tables {
 	];
 	my $tables = $is->tables();
 	is_deeply( $tables, $expected_result, "Get Tables" );
+}
+
+sub has_table {
+	ok( $is->has_table( 'Property' ) );
+}
+
+sub hasnt_table {
+	ok( !$is->has_table( 'NonExistantTable' ) );
 }
 
 sub feature_components {

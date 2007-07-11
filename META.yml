@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                Win32-InstallShield
-version:             0.3
+version:             0.4
 abstract:            InstallShield data file interface
 license:             perl
 generated_by:        ExtUtils::MakeMaker version 6.36
