@@ -49,7 +49,7 @@ lines</td><td/></row>
 		<col def="S0">ISDotNetInstallerArgsCommit</col>
 		<col def="S0">ISDotNetInstallerArgsUninstall</col>
 		<col def="S0">ISDotNetInstallerArgsRollback</col>
-		<row><td>ComponentA.dll</td><td>{0D81A454-4336-4633-8C1E-DD74D3925C7F}</td><td>BIN</td><td>8</td><td/><td>componenta.dll</td><td>1</td><td/><td/><td/><td>/LogFile=</td><td>/LogFile=</td><td>/LogFile=</td><td>/LogFile=</td></row>
+		<row><td>ComponentA.dll</td><td>{0D81A454-4336-4633-8C1E-DD74D3925C7F}</td><td>BIN</td><td>257</td><td/><td>componenta.dll</td><td>1</td><td/><td/><td/><td>/LogFile=</td><td>/LogFile=</td><td>/LogFile=</td><td>/LogFile=</td></row>
 		<row><td>ComponentB.dll</td><td>{1D81A454-4336-4633-8C1E-DD74D3925C7F}</td><td>BIN</td><td>8</td><td/><td>componentb.dll</td><td>1</td><td/><td/><td/><td>/LogFile=</td><td>/LogFile=</td><td>/LogFile=</td><td>/LogFile=</td></row>
 	</table>
 

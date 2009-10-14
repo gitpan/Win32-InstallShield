@@ -24,6 +24,12 @@ my @tests = (
 	\&has_table,
 	\&hasnt_table,
 	\&feature_components,
+	\&summary_lookup,
+	\&summary_update,
+	\&get_set_attribute,
+	\&get_unset_attribute,
+	\&get_inverted_attribute,
+	\&set_attribute,
 );
 
 main();
@@ -94,6 +100,15 @@ sub add_or_update_update {
 	ok( compare_file( 't/update.ism' ), "AddOrUpdate Update" );
 }
 
+sub summary_lookup {
+	is( $is->summary('codepage'), '1252', "Summary Lookup" );
+}
+
+sub summary_update {
+	$is->summary('codepage', '1234');
+	ok( compare_file( 't/summary.ism' ), "Summary Update" );
+}
+
 sub hash_search {
 	my $expected_result = [
 		{
@@ -147,11 +162,11 @@ sub tables {
 }
 
 sub has_table {
-	ok( $is->has_table( 'Property' ) );
+	ok( $is->has_table( 'Property' ), "Has Table" );
 }
 
 sub hasnt_table {
-	ok( !$is->has_table( 'NonExistantTable' ) );
+	ok( !$is->has_table( 'NonExistantTable' ), "Hasn't Table" );
 }
 
 sub feature_components {
@@ -161,6 +176,38 @@ sub feature_components {
 	];
 	my $components = $is->featureComponents( 'Feature1' );
 	is_deeply( $components, $expected_result, "Feature Components" );
+}
+
+sub get_set_attribute {
+	my $is_set = $is->get_component_attribute( 'ComponentA.dll', 'SharedDllRefCount' );
+	is( $is_set, 1, 'Get Set Attribute' );
+}
+
+sub get_unset_attribute {
+	my $is_set = $is->get_component_attribute( 'ComponentA.dll', '64bit' );
+	is( $is_set, 0, 'Get Unset Attribute' );
+}
+
+sub get_inverted_attribute {
+	my $is_set = $is->get_component_attribute( 'ComponentA.dll', 'LocalOnly' );
+	is( $is_set, 1, 'Get inverted attribute' );
+}
+
+sub set_attribute {
+
+	# inverted attribute, will turn bit 1 on
+	$is->set_component_attribute( 'ComponentA.dll', 'LocalOnly', 0);
+
+	# enable this flag
+	$is->set_component_attribute( 'ComponentA.dll', '64bit', 1);
+	
+	# disable this flag
+	$is->set_component_attribute( 'ComponentA.dll', 'SharedDllRefCount', 0);
+	
+	# already on, no change
+	$is->set_component_attribute( 'ComponentB.dll', 'SharedDllRefCount', 1);
+
+	ok( compare_file( 't/attribute.ism' ), 'Set Attribute' );
 }
 
 # compares the contents of a file on disk to the current

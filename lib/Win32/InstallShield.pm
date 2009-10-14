@@ -9,7 +9,25 @@ use strict;
 use warnings;
 
 our $AUTOLOAD;
-our $VERSION = 0.4;
+our $VERSION = 0.5;
+
+my %component_attr_values = (
+	LocalOnly                 => 0,
+	SourceOnly                => 1,
+	Optional                  => 2,
+	RegistryKeyPath           => 4,
+	SharedDllRefCount         => 8,
+	Permanent                 => 16,
+	ODBCDataSource            => 32,
+	Transitive                => 64,
+	NeverOverwrite            => 128,
+	'64bit'                   => 256,
+	DisableRegistryReflection => 512,
+	UninstallOnSupersedence   => 1024,
+	AttributesShared          => 2048,
+);
+
+my %component_attr_names = map { $component_attr_values{$_} => $_ } keys %component_attr_values;
 
 =head1 NAME
 
@@ -69,6 +87,7 @@ sub new {
 
 	my $self = {
 		parser		=> XML::Parser->new(Style => 'Tree'),
+		summary_fields  => [], # list of valid summary fields from the DTD
 		parsed		=> {}, # tables that the user has read or modified
 		sections	=> {}, # the contents of the original file
 		order		=> [], # the order in which sections appear in the file
@@ -103,7 +122,7 @@ sub AUTOLOAD {
 
 		unless($self->{'sections'}{$table}) {
 			carp("No such table: $2");
-			return undef;
+			return;
 		}
 
 		if($op eq 'gethash') {
@@ -136,6 +155,11 @@ sub AUTOLOAD {
 # with an IO::File filehandle, it just returns the filehandle.
 sub _openfile {
 	my ($file, $mode) = @_;
+
+	if(!defined($file)) {
+		carp("File name or handle required\n");
+		return (undef, 0);
+	}
 
 	if(ref($file)) {
 		if(ref($file) eq 'IO::File') {
@@ -212,7 +236,9 @@ sub load {
 	my @lines = split("\n", $data);
 
 	foreach (@lines) {
-		if(/^<msi/) {
+		if(/^<!DOCTYPE msi \[/) {
+			$section = 'dtd';
+		} elsif(/^<msi/) {
 			$section = 'msi';
 		} elsif(/^\s*<summary>/) {
 			$section = 'summary';
@@ -299,7 +325,11 @@ sub save {
 	foreach my $section (@{$self->{'order'}}) {
 		if($self->{'parsed'}{$section}) {
 			# the table has been (possibly) modified, so rebuild it
-			$text .= $self->_save_table($section);
+			if($section eq 'summary') {
+				$text .= $self->_save_summary;
+			} else {
+				$text .= $self->_save_table($section);
+			}
 		} else {
 			# when the last table gets modified, we end up with an
 			# extra newline
@@ -310,6 +340,33 @@ sub save {
 			$text .= join("\n", @{$self->{'sections'}{$section}}) . "\n";
 		}
 	}
+
+	return $text;
+}
+
+sub _save_summary {
+	my ($self) = @_;
+
+	my $count = 0;
+	my %order =
+		map { $_ => $count++ }
+		$self->summary_fields;
+
+	my $summary = $self->{'parsed'}{'summary'};
+
+	my $text = "\t<summary>\n";
+
+	foreach my $field (sort { $order{$a} <=> $order{$b} } keys %order) {
+		if(exists($summary->{$field})) {
+			if(!defined($summary->{$field}) || $summary->{$field} eq '') {
+				$text .= "\t\t<$field/>\n";
+			} else {
+				$text .= "\t\t<$field>" . $summary->{$field} . "</$field>\n";
+			}
+		}
+	}
+
+	$text .= "\t</summary>\n\t\n";
 
 	return $text;
 }
@@ -359,7 +416,7 @@ sub _parse_table {
 	
 	$table = lc($table);
 	return if($self->{'parsed'}{$table});
-
+	
 	my $text = $self->{'sections'}{$table};
 	unless(defined($text)) {
 		carp("No such table $table");
@@ -468,7 +525,7 @@ sub column_is_key {
 			return $col->{'is_key'};
 		}
 	}
-	return undef;
+	return;
 }
 
 =item I<column_width>
@@ -546,7 +603,7 @@ sub _find_row {
 	if(exists($p->{'data'}{$lookup_key})) {
 		return $lookup_key;
 	} else {
-		return undef;
+		return;
 	}
 }
 
@@ -600,7 +657,7 @@ sub _build_key {
 				$lookup_key .= sprintf("%-${width}s", $values->[$i]);
 			} else {
 				carp("Missing key column " . $p->{'columns'}[$i]{'name'});
-				return undef;
+				return;
 			}
 		}
 	}
@@ -647,7 +704,7 @@ sub _check_args {
 
 	unless( $#{$row} eq $#{$p->{'columns'}} ) {
 		carp("Wrong number of columns supplied for table $table");
-		return undef;
+		return;
 	}
 
 	foreach my $i (0..$#{$row}) {
@@ -656,13 +713,13 @@ sub _check_args {
 		if($type =~ /^i$/i) {
 			if($row->[$i] =~ /[^\d-]/) {
 				croak("Value in $p->{'columns'}[$i]{'name'} column must be numeric");
-				return undef;
+				return;
 			}
 		} else {
 			my $width = $p->{'columns'}[$i]{'width'};
 			if($width > 0 and length($row->[$i]) > $width) {
 				croak("Value in $p->{'columns'}[$i]{'name'} column is too long");
-				return undef;
+				return;
 			}
 		}
 	}
@@ -673,24 +730,142 @@ sub _check_args {
 =item I<property>
 
   my $version = $is->property('ProductVersion');
-  $is->property('ProductVersion', $version);
+  my $success = $is->property('ProductVersion', $version);
 
-Gets or sets the value associated with a property. If no
-value is supplied, the current value of the property is returned.
-If a value is supplied, it will attempt to update the property and
-return 1 on success and 0 on failure. undef is returned in either
-case if the property does not exist.
+Gets or sets the value associated with a property.  If a value is
+supplied, it will attempt to update the property and return 1 
+on success and 0 on failure. undef is returned if the property does not exist.
 
 =cut
 sub property {
 	my ($self, $property, $value) = @_;
 	unless(defined($self->getHash_Property({ Property=>$property }))) {
-		return undef;
+		return;
 	}
 	if(defined($value)) {
 		$self->update_Property({ Property=>$property, Value=>$value });
 	}
 	return $self->getHash_Property({ Property=>$property });
+}
+
+=item I<summary>
+
+  my $summary_value = $is->summary( $summary_field );
+  my $success = $is->summary( $summary_field, $value );
+
+  my $summary_table = $is->summary;
+
+Gets or sets the value associated with a field in the summary table.
+If no field name is provided, a reference to a hash containing all
+of the summary field/value pairs.
+
+=cut
+sub summary {
+	my ($self, $field, $value) = @_;
+
+	unless(exists($self->{'parsed'}{'summary'})) {
+		$self->_parse_summary;
+	}
+	
+	my $data = $self->{'parsed'}{'summary'};
+
+	return $data unless(defined($field));
+
+	if(defined($value)) {
+		# make sure this summary field is allowed by the DTD
+		return 0 unless($self->valid_summary_field($field));
+		$data->{$field} = $value;
+		return 1;
+	} else {
+		return $data->{$field};
+	}
+}
+
+=item I<summary_fields>
+
+  my @field_names = $is->summary_fields;
+
+Returns a list of the valid fields for the summary table, as they appear
+in the DTD embedded in the ISM file.
+
+=cut
+sub summary_fields {
+	my ($self) = @_;
+	
+	$self->_parse_summary unless(defined($self->{'parsed'}{'summary'}));
+
+	return @{$self->{'summary_fields'}};
+}
+
+=item I<valid_summary_field>
+  
+  my $is_valid = $is->valid_summary_field( $field_name );
+
+Returns 1 if the field $field_name is valid according to the DTD
+in the ISM file, 0 otherwise.
+
+=cut
+sub valid_summary_field {
+	my ($self, $field) = @_;
+
+	return 0 unless(defined($field));
+
+	foreach my $valid_field ($self->summary_fields) {
+		return 1 if($field eq $valid_field);
+	}
+
+	return 0;
+}
+
+# get the list of valid summary fields from the DTD
+sub _parse_summary_fields {
+	my ($self) = @_;
+
+	my $text = join('', @{$self->{'sections'}{'dtd'}});
+
+	my ($summary_fields_text) = $text =~ /<!ELEMENT summary\s+\(([^)]+)\)/;
+
+	$summary_fields_text =~ s/[\?\s]//g;
+	
+	my @summary_fields = split(',', $summary_fields_text);
+	
+	$self->{'summary_fields'} = \@summary_fields;
+}
+
+# turn the XML for the summary table into something we can manipulate easily
+sub _parse_summary {
+	my ($self) = @_;
+
+	$self->_parse_summary_fields;
+
+	my $text = $self->{'sections'}{'summary'};
+	unless(defined($text)) {
+		carp("No summary found");
+		return;
+	}
+
+	my %data;
+
+	my $xml = join("\n", @$text);
+	my @parsed = @{$self->{'parser'}->parse($xml)->[1]};
+
+	my $attributes = shift @parsed;
+
+	while(@parsed) {
+		my $type = shift @parsed;
+
+		# ignore text
+		if($type eq '0') {
+			shift @parsed;
+			next;
+		}
+
+		my $value = shift @parsed;
+		$data{ $type } = $value->[2];
+
+	}
+
+	$self->{'parsed'}{'summary'} = \%data;
 }
 
 =item I<featureComponents>
@@ -705,7 +880,7 @@ sub featureComponents {
 	my ($self, $feature) = @_;
 	my $list = $self->searchHash_FeatureComponents({ Feature_=>$feature });
 	unless(@{$list}) {
-		return undef;
+		return;
 	}
 
 	my @components = sort map { $_->{'Component_'} } @{$list};
@@ -713,43 +888,165 @@ sub featureComponents {
 	return \@components;
 }
 
-=item I<purge_row>
+=back
 
-	$is->purge_row( $table, $key_value );
-	$is->purge_row( 'Component', 'Awesome.dll' );
-	$is->PurgeComponent( 'Awesome.dll' );
+=head1 COMPONENT ATTRIBUTES
 
-Removes the row with the given key from the given table, and any rows
-in other tables with foreign keys that reference it. Key values are
-case sensitive. This only works for tables with a key column that has
-the same name as the table, which seems to be the only way you can use
-foreign keys in an ISM in any case. Returns 1 on success, 0 on failure.
+
+All of the attribute methods can accept an attribute as either
+a name or a value. The name can be prefixed with msidbComponentAttributes
+as it is in the MSI documentation, but it is not required.
+
+Valid attributes:
+  LocalOnly                  0
+  SourceOnly                 1
+  Optional                   2
+  RegistryKeyPath            4
+  SharedDllRefCount          8
+  Permanent                  16
+  ODBCDataSource             32
+  Transitive                 64
+  NeverOverwrite             128
+  64bit                      256
+  DisableRegistryReflection  512
+  UninstallOnSupersedence    1024
+  AttributesShared           2048
+
+=over 4
+
+=item I<set_component_attribute>
+
+  my $success = $is->set_component_attribute( $component_name, '64bit', 1 );
+
+Update the value of a single component attribute flag. Returns 1 on success,
+0 on failure.
 
 =cut
-sub _purge_row {
-	my ($self, $table, $key_value) = @_;
+sub set_component_attribute {
+	my ($self, $component_name, $attribute, $bit_on) = @_;
 
-	# make sure the key exists in the table
-	my $rowkey = $self->_find_row($table, $self->_reformat_args($table, $key_value));
-	unless(defined($rowkey)) {
-		return 0;
+	my $attr_num = $self->get_component_attribute_value( $attribute );
+
+	return 0 unless(defined($attr_num));
+
+	if($attr_num == 0) {
+		$attr_num = 1;
+		$bit_on = !$bit_on;
 	}
 
-	$self->_del_row($table, $rowkey);
+	my $component = $self->getHash_Component($component_name);
 
-	my $foreign_key_col = $self->{'correct_case'}{$table} . '_';
+	return 0 unless(defined($component));
 
-	foreach my $table (@{$self->{'foreign_keys'}{$foreign_key_col}}) {
-		my $rows_to_delete = $self->_search_row_array($table, { $foreign_key_col => $key_value });
-		if(@{$rows_to_delete}) {
-			foreach my $row (@{$rows_to_delete}) {
-				$self->_del_row($table, $row) or return 0;
-			}
-		}
+	if($bit_on) {
+		$component->{'Attributes'} |= $attr_num;
+	} else {
+		my $inverted_attr_num = ~$attr_num;
+		$component->{'Attributes'} &= $inverted_attr_num;
 	}
 
-	return 1;
+	return $self->update_component($component);
+
 }
+
+=item I<get_component_attribute>
+
+  my $is_64bit = $is->get_component_attribute( $component_name, '64bit' );
+  my $is_shared = $is->get_component_attribute( $component_name, 8 );
+
+Returns 1 if the named component has the given attribute set, 0 otherwise.
+Returns undef if the component does not exist, or the attribute is invalid.
+The attribute name or value can be used.
+
+=cut
+sub get_component_attribute {
+	my ($self, $component_name, $attribute) = @_;
+
+	my $invert = 0;
+	my $attr_num = $self->get_component_attribute_value( $attribute );
+	
+	return unless(defined($attr_num));
+
+	# for some reason, the docs have bit 1 listed twice, once for
+	# on and once for off (as hex value 0x0)
+	if($attr_num == 0) {
+		$attr_num = 1;
+		$invert = 1;
+	}
+
+	my $component = $self->getHash_Component($component_name);
+	
+	# must find exactly one component with this name
+	return unless(defined($component));
+
+	my $set = ($component->{'Attributes'} & $attr_num) ? 1 : 0;
+	
+	$set = !$set if($invert);
+
+	return $set;
+}
+
+=item I<get_component_attribute_value>
+
+  my $attr_number = $is->get_component_attribute_value( 'LocalOnly' );
+
+Given a component attribute name, returns the bit value associated
+with the attribute. The msidbComponentAttributes prefix for attribute names
+is accepted, but not required. Given a valid attribute value, simply returns
+the value. Returns undef on invalid input.
+
+=cut
+sub get_component_attribute_value {
+	my ($self, $attribute) = @_;
+	
+	$attribute =~ s/^msidbComponentAttributes//;
+	if($attribute =~ /^\d+$/) {
+		if(exists($component_attr_names{$attribute})) {
+			return $attribute;
+		}
+	} elsif(exists($component_attr_values{$attribute})) {
+		return $component_attr_values{$attribute};
+	}
+
+	return;
+}
+
+=item I<get_component_attribute_name>
+
+  my $attr_name = $is->get_component_attribute_name( 512 );
+
+Given a component attribute value, returns the name associated
+with the value. Given a valid attribute name, simply returns
+the name. The msidbComponentAttributes prefix for attribute names
+is accepted, but not required. Returns undef on invalid input.
+
+=cut
+sub get_component_attribute_name {
+	my ($self, $attribute) = @_;
+	
+	$attribute =~ s/^msidbComponentAttributes//;
+	if($attribute =~ /^\d+$/) {
+		if(exists($component_attr_names{$attribute})) {
+			return $component_attr_values{$attribute};
+		}
+	} elsif(exists($component_attr_values{$attribute})) {
+		return $component_attr_names{$attribute};
+	}
+
+	return;
+}
+
+=item I<valid_component_attributes>
+
+  my @attr_names = $is->valid_component_attributes;
+
+Returns a list of valid attribute names.
+
+=cut
+sub valid_component_attributes {
+	return map { $component_attr_names{$_} } sort { $a <=> $b } keys %component_attr_names;
+}
+
 =back
 
 =head1 ROW MANIPULATION METHOD SYNTAX
@@ -826,7 +1123,7 @@ sub _get_row_hash {
 		}
 		return \%rowdata;
 	} else {
-		return undef;
+		return;
 	}
 }
 
@@ -846,7 +1143,7 @@ sub _get_row_array {
 		my $p = $self->_parsed($table);
 		return $p->{'data'}{$rowkey};
 	} else {
-		return undef;
+		return;
 	}
 }
 
@@ -927,6 +1224,44 @@ sub _del_row {
 	}
 	my $p = $self->_parsed($table);
 	delete($p->{'data'}{$rowkey});
+	return 1;
+}
+
+=item I<purge_row>
+
+  $is->purge_row( $table, $rowdata );
+  $is->purge_row( 'Component', 'Awesome.dll' );
+  $is->PurgeComponent( 'Awesome.dll' );
+
+Removes the row that matches the key in $rowdata from the given table, and any rows
+in other tables with foreign keys that reference it. Key values are
+case sensitive. This only works for tables with a key column that has
+the same name as the table, which seems to be the only way you can use
+foreign keys in an ISM in any case. Returns 1 on success, 0 on failure.
+
+=cut
+sub _purge_row {
+	my ($self, $table, $key_value) = @_;
+
+	# make sure the key exists in the table
+	my $rowkey = $self->_find_row($table, $self->_reformat_args($table, $key_value));
+	unless(defined($rowkey)) {
+		return 0;
+	}
+
+	$self->_del_row($table, $rowkey);
+
+	my $foreign_key_col = $self->{'correct_case'}{$table} . '_';
+
+	foreach my $table (@{$self->{'foreign_keys'}{$foreign_key_col}}) {
+		my $rows_to_delete = $self->_search_row_array($table, { $foreign_key_col => $key_value });
+		if(@{$rows_to_delete}) {
+			foreach my $row (@{$rows_to_delete}) {
+				$self->_del_row($table, $row) or return 0;
+			}
+		}
+	}
+
 	return 1;
 }
 
@@ -1041,6 +1376,29 @@ sub _xml_escape {
 
 Kirk Baucom, E<lt>kbaucom@schizoid.comE<gt>
 
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2003 by Kirk Baucom
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
 =cut
 
 1;
+
+__DATA__
+
+msidbComponentAttributesLocalOnly 0
+msidbComponentAttributesSourceOnly 1
+msidbComponentAttributesOptional 2
+msidbComponentAttributesRegistryKeyPath 4
+msidbComponentAttributesSharedDllRefCount 8
+msidbComponentAttributesPermanent 16
+msidbComponentAttributesODBCDataSource 32
+msidbComponentAttributesTransitive 64
+msidbComponentAttributesNeverOverwrite 128
+msidbComponentAttributes64bit 256
+msidbComponentAttributesDisableRegistryReflection 512
+ 
+

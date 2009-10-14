@@ -1,5 +1,9 @@
 Revision history for Perl extension Win32::InstallShield
 
+Version 0.5 (2009/10/14)
+	- Added methods to manipulate the summary table
+	- Added methods to get and set component attributes
+
 Version 0.4 (2007/07/11)
 	- Added 'has_table' method
 

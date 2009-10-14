@@ -7,6 +7,8 @@ t/del.ism
 t/update.ism
 t/purge.ism
 t/original.ism
+t/attribute.ism
+t/summary.ism
 MANIFEST
 Makefile.PL
 README

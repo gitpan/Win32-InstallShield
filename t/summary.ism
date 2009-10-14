@@ -13,7 +13,7 @@
 <msi version="2.0" xmlns:dt="urn:schemas-microsoft-com:datatypes">
 	
 	<summary>
-		<codepage>1252</codepage>
+		<codepage>1234</codepage>
 		<title>##ID_STRING1##</title>
 	</summary>
 	

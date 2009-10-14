@@ -3,6 +3,11 @@
 <!DOCTYPE msi [
    <!ELEMENT msi   (summary,table*)>
 
+   <!ELEMENT summary       (codepage?,title?,subject?,author?,keywords?,comments?,
+                            template,lastauthor?,revnumber,lastprinted?,
+                            createdtm?,lastsavedtm?,pagecount,wordcount,
+                            charcount?,appname?,security?)>
+
    <!ELEMENT table         (col+,row*)>
 ]>
 <msi version="2.0" xmlns:dt="urn:schemas-microsoft-com:datatypes">
