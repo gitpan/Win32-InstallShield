@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Win32-InstallShield
-version:            0.5
+version:            0.6
 abstract:           InstallShield data file interface
 author:
     - Kirk Baucom <kbaucom@schizoid.com>
@@ -16,7 +16,7 @@ no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.50
+generated_by:       ExtUtils::MakeMaker version 6.55_02
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4
