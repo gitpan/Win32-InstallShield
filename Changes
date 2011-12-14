@@ -1,5 +1,8 @@
 Revision history for Perl extension Win32::InstallShield
 
+Version 0.7 (2011/12/13)
+	- Handle empty key columns (from Torsten Werner)
+
 Version 0.6 (2011/10/18)
 	- Detect file encoding, and use it when writing modified tables
 		(from Torsten Werner)

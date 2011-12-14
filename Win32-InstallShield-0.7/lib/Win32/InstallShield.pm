@@ -10,7 +10,7 @@ use strict;
 use warnings;
 
 our $AUTOLOAD;
-our $VERSION = 0.6;
+our $VERSION = 0.7;
 
 my %component_attr_values = (
 	LocalOnly                 => 0,
@@ -700,12 +700,8 @@ sub _build_key {
 	foreach my $i (0..$#{$p->{'columns'}}) {
 		if($p->{'columns'}[$i]{'is_key'}) {
 			my $width = $p->{'columns'}[$i]{'width'};
-			if(defined($values->[$i])) {
-				$lookup_key .= sprintf("%-${width}s", $values->[$i]);
-			} else {
-				carp("Missing key column " . $p->{'columns'}[$i]{'name'});
-				return;
-			}
+			$lookup_key .= sprintf("%-${width}s",
+				(defined($values->[$i])) ? $values->[$i] : '');
 		}
 	}
 
